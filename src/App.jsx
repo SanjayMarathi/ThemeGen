@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 
 const harmonyModes = {
   Complementary: 2,
@@ -21,29 +21,42 @@ function hslToHex(h, s, l) {
   return `#${f(0)}${f(8)}${f(4)}`.toUpperCase();
 }
 
-function generatePalette(mode, baseHue) {
+function generatePalette(mode, baseHue, saturation) {
   const colorCount = harmonyModes[mode];
   if (mode === "Monochromatic") {
     return Array.from({ length: 5 }, (_, i) =>
-      hslToHex(baseHue, 65, 25 + i * 15),
+      hslToHex(baseHue, saturation, 25 + i * 15),
     );
   }
   const step = 360 / colorCount;
   return Array.from({ length: colorCount }, (_, i) =>
-    hslToHex((baseHue + i * step) % 360, 60, 50),
+    hslToHex((baseHue + i * step) % 360, saturation, 50),
   );
 }
 
 export default function App() {
   const [mode, setMode] = useState("Complementary");
   const [baseHue, setBaseHue] = useState(210);
+  const [baseSaturation, setBaseSaturation] = useState(70);
   const [isDarkMode, setIsDarkMode] = useState(true); // Strict UI mode
   const [activePage, setActivePage] = useState("landing");
   const wheelRef = useRef(null);
+  const [wheelRadius, setWheelRadius] = useState(100);
+
+  useEffect(() => {
+    const updateWheelRadius = () => {
+      if (wheelRef.current) {
+        setWheelRadius(wheelRef.current.offsetWidth / 2);
+      }
+    };
+    updateWheelRadius();
+    window.addEventListener("resize", updateWheelRadius);
+    return () => window.removeEventListener("resize", updateWheelRadius);
+  }, []);
 
   const palette = useMemo(
-    () => generatePalette(mode, baseHue),
-    [mode, baseHue],
+    () => generatePalette(mode, baseHue, baseSaturation),
+    [mode, baseHue, baseSaturation],
   );
 
   // STRICT UI THEME (Editor Shell - Never changes based on wheel)
@@ -65,12 +78,27 @@ export default function App() {
   };
 
   const handleWheelClick = (e) => {
+    if (!wheelRef.current) return;
     const rect = wheelRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left - rect.width / 2;
-    const y = e.clientY - rect.top - rect.height / 2;
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const x = e.clientX - rect.left - centerX;
+    const y = e.clientY - rect.top - centerY;
     const angle = Math.atan2(y, x) * (180 / Math.PI);
+    const distance = Math.min(Math.sqrt(x * x + y * y), rect.width / 2);
+    const saturation = Math.max(
+      5,
+      Math.min(100, Math.round((distance / (rect.width / 2)) * 100)),
+    );
     setBaseHue(Math.round((angle + 450) % 360));
+    setBaseSaturation(saturation);
   };
+
+  const ringRadius = Math.max(0, wheelRadius - 20);
+  const pointerRadius = (baseSaturation / 100) * ringRadius;
+  const pointerAngleRad = ((baseHue - 90) * Math.PI) / 180;
+  const pointerX = Math.cos(pointerAngleRad) * pointerRadius;
+  const pointerY = Math.sin(pointerAngleRad) * pointerRadius;
 
   const exportConfig = () => {
     const data = {
@@ -115,16 +143,51 @@ export default function App() {
             <div
               ref={wheelRef}
               onClick={handleWheelClick}
-              className="relative aspect-square rounded-full cursor-crosshair border-4 shadow-2xl"
+              className="relative aspect-square w-full max-w-xs rounded-full cursor-crosshair border-4 shadow-2xl"
               style={{
                 background:
                   "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)",
                 borderColor: ui.border,
               }}
             >
+              {/* Markers for all palette colors */}
+              {palette.map((color, idx) => {
+                const colorCount = palette.length;
+                const step = 360 / colorCount;
+                const angle = (baseHue + idx * step) % 360;
+                const rad = ((angle - 90) * Math.PI) / 180;
+                const markerRadius = Math.max(12, (baseSaturation / 100) * ringRadius);
+                const x = Math.cos(rad) * markerRadius;
+                const y = Math.sin(rad) * markerRadius;
+                return (
+                  <div
+                    key={color}
+                    className="absolute w-6 h-6 border-4 rounded-full shadow-lg cursor-pointer"
+                    style={{
+                      left: `calc(50% + ${x}px - 12px)`,
+                      top: `calc(50% + ${y}px - 12px)`,
+                      backgroundColor: color,
+                      borderColor: color === palette[0] ? "#000" : "#fff",
+                      zIndex: color === palette[0] ? 2 : 1,
+                    }}
+                    title={color}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setBaseHue(angle);
+                    }}
+                  />
+                );
+              })}
+
+              {/* Pointer indicator for current hue/saturation */}
               <div
-                className="absolute top-1/2 left-1/2 w-6 h-6 bg-white border-[3px] border-black rounded-full shadow-lg pointer-events-none -translate-x-1/2 -translate-y-1/2"
-                style={{ transform: `rotate(${baseHue}deg) translateY(-80px)` }}
+                className="absolute w-6 h-6 border-[3px] rounded-full shadow-lg pointer-events-none"
+                style={{
+                  left: `calc(50% + ${pointerX}px - 12px)`,
+                  top: `calc(50% + ${pointerY}px - 12px)`,
+                  borderColor: "#000",
+                  backgroundColor: palette[0],
+                }}
               />
             </div>
           </div>
@@ -281,21 +344,22 @@ export default function App() {
                     Project Overview
                   </h2>
                   <div className="flex gap-2">
-                    <div
-                      className="w-10 h-10 rounded-full"
-                      style={{ backgroundColor: project.secondary }}
-                    />
-                    <div
-                      className="w-10 h-10 rounded-full"
-                      style={{ backgroundColor: project.primary }}
-                    />
+                    {palette.map((c, idx) => (
+                      <div
+                        key={c}
+                        className="w-10 h-10 rounded-full border"
+                        style={{ backgroundColor: c, borderColor: ui.border }}
+                        title={`Palette ${idx + 1}`}
+                      />
+                    ))}
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-8">
-                  {[1, 2, 3].map((i) => (
+                {/* Palette Graph */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                  {palette.map((color, idx) => (
                     <div
-                      key={i}
-                      className="p-10 rounded-[2rem] shadow-sm border"
+                      key={color}
+                      className="p-10 rounded-[2rem] shadow-sm border flex flex-col items-center"
                       style={{
                         backgroundColor: project.card,
                         borderColor: ui.border,
@@ -303,22 +367,27 @@ export default function App() {
                     >
                       <h4
                         className="text-[10px] font-bold uppercase opacity-40 mb-4"
-                        style={{ color: project.text }}
+                        style={{ color: color }}
                       >
-                        Metric Group 0{i}
+                        Palette Color {idx + 1}
                       </h4>
+                      <div
+                        className="w-16 h-16 rounded-full mb-4 border"
+                        style={{ backgroundColor: color, borderColor: ui.border }}
+                      />
                       <p
-                        className="text-5xl font-black"
-                        style={{ color: project.text }}
+                        className="text-lg font-bold mb-2"
+                        style={{ color: color }}
                       >
-                        84%
+                        {color}
                       </p>
-                      <div className="mt-6 h-2 w-full bg-black/10 rounded-full overflow-hidden">
+                      {/* Example graph bar */}
+                      <div className="mt-2 h-3 w-full bg-black/10 rounded-full overflow-hidden">
                         <div
                           className="h-full"
                           style={{
-                            width: "84%",
-                            backgroundColor: project.primary,
+                            width: `${60 + idx * 10}%`,
+                            backgroundColor: color,
                           }}
                         />
                       </div>
