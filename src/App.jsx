@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 
 const harmonyModes = {
   Complementary: 2,
@@ -70,6 +70,18 @@ export default function App() {
   const [activePage, setActivePage] = useState("landing");
 
   const wheelRef = useRef(null);
+  const [wheelRadius, setWheelRadius] = useState(100);
+
+  useEffect(() => {
+    const updateWheelRadius = () => {
+      if (wheelRef.current) {
+        setWheelRadius(wheelRef.current.offsetWidth / 2);
+      }
+    };
+    updateWheelRadius();
+    window.addEventListener("resize", updateWheelRadius);
+    return () => window.removeEventListener("resize", updateWheelRadius);
+  }, []);
 
   const palette = useMemo(() => generatePalette(mode, baseHue), [mode, baseHue]);
 
@@ -91,6 +103,7 @@ export default function App() {
   };
 
   const handleWheelClick = (e) => {
+    if (!wheelRef.current) return;
     const rect = wheelRef.current.getBoundingClientRect();
 
     const x = e.clientX - rect.left - rect.width / 2;
@@ -101,6 +114,12 @@ export default function App() {
 
     setBaseHue(Math.round(hue));
   };
+
+  const ringRadius = Math.max(0, wheelRadius - 20);
+  const pointerRadius = (baseSaturation / 100) * ringRadius;
+  const pointerAngleRad = ((baseHue - 90) * Math.PI) / 180;
+  const pointerX = Math.cos(pointerAngleRad) * pointerRadius;
+  const pointerY = Math.sin(pointerAngleRad) * pointerRadius;
 
   const exportConfig = () => {
     const data = {
@@ -154,6 +173,36 @@ export default function App() {
                 borderColor: ui.border,
               }}
             >
+              {/* Markers for all palette colors */}
+              {palette.map((color, idx) => {
+                const colorCount = palette.length;
+                const step = 360 / colorCount;
+                const angle = (baseHue + idx * step) % 360;
+                const rad = ((angle - 90) * Math.PI) / 180;
+                const markerRadius = Math.max(12, (baseSaturation / 100) * ringRadius);
+                const x = Math.cos(rad) * markerRadius;
+                const y = Math.sin(rad) * markerRadius;
+                return (
+                  <div
+                    key={color}
+                    className="absolute w-6 h-6 border-4 rounded-full shadow-lg cursor-pointer"
+                    style={{
+                      left: `calc(50% + ${x}px - 12px)`,
+                      top: `calc(50% + ${y}px - 12px)`,
+                      backgroundColor: color,
+                      borderColor: color === palette[0] ? "#000" : "#fff",
+                      zIndex: color === palette[0] ? 2 : 1,
+                    }}
+                    title={color}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setBaseHue(angle);
+                    }}
+                  />
+                );
+              })}
+
+              {/* Pointer indicator for current hue/saturation */}
               <div
                 className="absolute w-5 h-5 bg-white border-2 border-black rounded-full pointer-events-none"
                 style={{
